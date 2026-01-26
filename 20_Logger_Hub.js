@@ -16,7 +16,7 @@
 function registrarAcessoHub() {
   try {
     // IDs (Baseados no Config.js, mas repetidos aqui para segurança caso rode isolado)
-    const ID_COMPILADOS = "1ZLebBqhR1bMZgrnr_dfXikyIY22oi0B2pqXDz1UdRZM";
+    const ID_COMPILADOS = CONFIG.ids.compiladosLocal;
     const NOME_ABA_LOG = "Log_Acesso_Hub";
     
     // Identifica Usuário
