@@ -99,9 +99,10 @@ function distribuirDadosPorEquipe(alvos = null) {
   try {
     // 0. CARREGAMENTO E CONFIGURAÇÃO
     const regras = carregarRegrasDistribuicao(ss);
-    const idHistorico = "1s44YD2ozLAbBdGQbBE5iW7HcUzvQULZqd4ynYlV_HXA"; 
-    const idDadosAtuais = "1ZLebBqhR1bMZgrnr_dfXikyIY22oi0B2pqXDz1UdRZM";
-    const idPainelDestino = "1Rc5fUr-nP3g8SU9083Y-N83QZtg2wMCMlmlwcXJYl9k";
+    // USE AS VARIÁVEIS GLOBAIS
+    const idHistorico = CONFIG.ids.fonteDadosGeral; 
+    const idDadosAtuais = CONFIG.ids.compiladosLocal;
+    const idPainelDestino = CONFIG.ids.painelEquipe;
 
     // 1. CÁLCULO DO CMA HISTÓRICO
     const mapCMA = new Map();
