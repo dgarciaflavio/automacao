@@ -1,15 +1,15 @@
 // =================================================================
-// --- BLOCO 1: CONFIGURAÇÃO GLOBAL (ATUALIZADO) ---
+// --- BLOCO 1: CONFIGURAÇÃO GLOBAL (SEGURA) ---
 // =================================================================
 
 var CONFIG = {
   ids: {
-    materiais: "1jXd4uEnyGZvLv4ozDfFi5ZMlumw0TvleGdMKlgGcPtU",
-    medicamentos: "16_jA8i4zOKqgXDUdOyelrE0zMTGR27RaYQjZdlSInOE",
-    fonteDadosGeral: "1s44YD2ozLAbBdGQbBE5iW7HcUzvQULZqd4ynYlV_HXA",
-    correcaoExterna: "1r8lYhlCecGTKlx7hSM3Fj6KFQqyt1JYKTfQ7HGGj6Zc",
-    compiladosLocal: "1ZLebBqhR1bMZgrnr_dfXikyIY22oi0B2pqXDz1UdRZM",
-    painelEquipe: "1Rc5fUr-nP3g8SU9083Y-N83QZtg2wMCMlmlwcXJYl9k"
+    materiais: PropertiesService.getScriptProperties().getProperty('ID_MATERIAIS'),
+    medicamentos: PropertiesService.getScriptProperties().getProperty('ID_MEDICAMENTOS'),
+    fonteDadosGeral: PropertiesService.getScriptProperties().getProperty('ID_FONTE_GERAL'),
+    correcaoExterna: PropertiesService.getScriptProperties().getProperty('ID_CORRECAO'),
+    compiladosLocal: PropertiesService.getScriptProperties().getProperty('ID_COMPILADOS'),
+    painelEquipe: PropertiesService.getScriptProperties().getProperty('ID_PAINEL_EQUIPE')
   },
   abas: {
     materiais: "Material",
