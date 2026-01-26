@@ -14,7 +14,11 @@ function executarCicloCompleto() {
   if (respostaSenha.getSelectedButton() !== ui.Button.OK) return;
   
   const senhaDigitada = respostaSenha.getResponseText();
-  if (senhaDigitada !== "inca2026") {
+  
+  // BUSCA A SENHA SEGURA
+  const senhaCorreta = PropertiesService.getScriptProperties().getProperty('SENHA_ADMIN');
+
+  if (senhaDigitada !== senhaCorreta) {
     ui.alert("❌ Senha Incorreta. Acesso negado.");
     return;
   }
