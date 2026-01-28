@@ -1,11 +1,7 @@
 // =================================================================
-// --- BLOCO 22: OPERAÇÃO CONTINGÊNCIA (BUSCA AUTOMÁTICA POR PROCESSO) ---
+// --- BLOCO 22: OPERAÇÃO CONTINGÊNCIA (ATUALIZADO: CORTE 91 DIAS) ---
 // =================================================================
 
-/**
- * Função Principal: Varre a guia 'dados' em busca de itens críticos (<= 90 dias)
- * e gera o relatório agrupado por Processo SEI na aba 'OperacaoContingencia'.
- */
 function executarOperacaoContingencia() {
   const ui = SpreadsheetApp.getUi();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -48,19 +44,28 @@ function executarOperacaoContingencia() {
       });
     }
 
-    // 3. IDENTIFICAR ITENS CRÍTICOS (Estoque <= 90 dias)
+    // 3. IDENTIFICAR ITENS CRÍTICOS (Estoque <= 91 dias)
     const lastRowDados = abaDados.getLastRow();
     const processosCriticos = new Set();
     const dadosItensPorProcesso = new Map();
+
+    // DEFINIÇÃO DO CORTE (Margem de segurança para decimais como 90,53)
+    const DIAS_CORTE = 91; 
 
     if (lastRowDados >= 5) {
       const vDados = abaDados.getRange(5, 1, lastRowDados - 4, 39).getValues();
       vDados.forEach(linha => {
         const estoqueDias = parseFloat(linha[8]) || 0; // Coluna I (Saldo em dias)
-        const processo = String(linha[38]).trim();    // Coluna AM (Processo SEI)
+        let processo = String(linha[38]).trim();       // Coluna AM (Processo SEI)
         const codItem = _norm(linha[1]);
 
-        if (codItem && processo && processo !== "-" && estoqueDias <= 90) {
+        // TRATAMENTO PARA ITENS SEM PROCESSO
+        if (!processo || processo === "-" || processo === "0") {
+            processo = "Item sem processo";
+        }
+
+        // AGORA ACEITA <= 91 DIAS
+        if (codItem && estoqueDias <= DIAS_CORTE) {
           processosCriticos.add(processo);
           
           if (!dadosItensPorProcesso.has(processo)) {
@@ -79,7 +84,7 @@ function executarOperacaoContingencia() {
     }
 
     if (processosCriticos.size === 0) {
-      ui.alert("Nenhum processo com itens críticos (<= 90 dias) foi encontrado.");
+      ui.alert(`Nenhum item com estoque crítico (<= ${DIAS_CORTE} dias) foi encontrado.`);
       return;
     }
 
@@ -107,7 +112,14 @@ function executarOperacaoContingencia() {
 
     processosCriticos.forEach(proc => {
       const itens = dadosItensPorProcesso.get(proc);
-      const responsavel = mapaProcUser.get(proc) || "Não mapeado";
+      
+      // FORÇA "Não mapeado" SE FOR O CASO DE ITEM SEM PROCESSO
+      let responsavel = "";
+      if (proc === "Item sem processo") {
+          responsavel = "Não mapeado";
+      } else {
+          responsavel = mapaProcUser.get(proc) || "Não mapeado";
+      }
 
       itens.forEach((it, index) => {
         const empenhos = (mapaEmpenhos.get(it.codigo) || []).join("\n");
@@ -116,7 +128,7 @@ function executarOperacaoContingencia() {
         if (it.notes) infoAENotes += (infoAENotes ? "\n" : "") + `Note: ${it.notes}`;
 
         output.push([
-          index === 0 ? proc : "", // Só repete o processo na primeira linha do grupo para clareza
+          index === 0 ? proc : "", 
           index === 0 ? responsavel : "", 
           it.codigo,
           it.descricao,
@@ -153,7 +165,7 @@ function executarOperacaoContingencia() {
       abaDestino.setColumnWidth(8, 200); // Empenhos
     }
 
-    ui.alert("Operação Contingência concluída com sucesso!");
+    ui.alert(`Operação Contingência concluída!\nItens analisados com corte de ${DIAS_CORTE} dias.`);
 
   } catch (e) {
     ui.alert("Erro na Operação Contingência: " + e.message);
