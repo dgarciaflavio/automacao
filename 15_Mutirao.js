@@ -1,18 +1,16 @@
 // =================================================================
-// --- BLOCO 15: STATUS REPORT (ANTIGO MUTIRÃO) ---
+// --- BLOCO 15: STATUS REPORT (ATUALIZADO: FINANCEIRO + ÚLTIMO PREÇO) ---
 // =================================================================
 
 // ⚙️ CONFIGURAÇÃO GERAL
-const NOME_ABA_TRABALHO = "Status Report"; // <--- NOME DEFINITIVO DA ABA
+const NOME_ABA_TRABALHO = "Status Report"; 
 
 // 📧 CONFIGURAÇÃO DE E-MAILS (SEGURA)
 const CONFIG_EMAILS_MUTIRAO = {
-  MODO_TESTE: true, // <--- MANTENHA 'true' PARA TESTAR SE FUNCIONA
+  MODO_TESTE: true, 
 
-  // Busca o e-mail de teste nas propriedades
   EMAIL_TESTE: PropertiesService.getScriptProperties().getProperty('EMAIL_MUTIRAO_TESTE'), 
 
-  // Busca a lista geral e converte de texto para Array, removendo espaços extras
   get LISTA_GERAL() {
     const listaTexto = PropertiesService.getScriptProperties().getProperty('EMAIL_MUTIRAO_LISTA');
     return listaTexto ? listaTexto.split(',').map(e => e.trim()) : [];
@@ -20,7 +18,7 @@ const CONFIG_EMAILS_MUTIRAO = {
 };
 
 /**
- * FUNÇÃO 1: Janela de Contexto
+ * FUNÇÃO 1: Janela de Contexto (Menu)
  */
 function processarMutirao() {
   const html = HtmlService.createHtmlOutput(`
@@ -46,7 +44,7 @@ function processarMutirao() {
         <label><input type="radio" name="opcao" value="MUTIRAO" checked> 🏃‍♂️ <b>Mutirão</b></label>
         <label><input type="radio" name="opcao" value="ACAO"> 🎯 <b>Grupo Ação</b></label>
         <button type="button" class="btn" onclick="enviar()">Confirmar</button>
-        <div id="msg" class="loading">🔄 Gerando Status Report (PDF + Excel)...</div>
+        <div id="msg" class="loading">🔄 Processando Dados Financeiros e Estoque...</div>
       </form>
     </div>
     <script>
@@ -69,7 +67,7 @@ function processarMutirao() {
 }
 
 /**
- * FUNÇÃO 2: Motor Lógico
+ * FUNÇÃO 2: Motor Lógico Principal
  */
 function executarMutiraoComContexto(tipoOrigem) {
   const ui = SpreadsheetApp.getUi();
@@ -80,40 +78,50 @@ function executarMutiraoComContexto(tipoOrigem) {
     const abaDados = ss.getSheetByName("dados");
     const abaCompilados = ss.getSheetByName("Compilados");
 
-    if (!abaMutirao) throw new Error(`A guia '${NOME_ABA_TRABALHO}' não foi encontrada. Renomeie a aba na planilha.`);
+    if (!abaMutirao) throw new Error(`A guia '${NOME_ABA_TRABALHO}' não foi encontrada.`);
     if (!abaDados || !abaCompilados) throw new Error("Abas de dados ('dados' ou 'Compilados') não encontradas.");
 
     const NOME_CONTEXTO = (tipoOrigem === "MUTIRAO") ? "MUTIRÃO" : "GRUPO AÇÃO";
     const COR_TITULO = (tipoOrigem === "MUTIRAO") ? "#1c4587" : "#cc0000"; 
 
-    // --- PRESERVAR OBSERVAÇÕES ---
+    // --- 1. PRESERVAR DADOS MANUAIS (Obs e Qtd Solicitada) ---
     const lastRowMult = abaMutirao.getLastRow();
     if (lastRowMult < 2) { ui.alert(`A guia '${NOME_ABA_TRABALHO}' parece vazia.`); return; }
 
     const mapObservacoesSalvas = new Map();
-    const dadosAtuais = abaMutirao.getRange(2, 1, lastRowMult - 1, 9).getValues();
+    const mapQtdSolicitada = new Map();
+
+    // Lê até a Coluna K (Obs) para garantir que pegamos tudo
+    const dadosAtuais = abaMutirao.getRange(2, 1, lastRowMult - 1, 11).getValues();
+    
     dadosAtuais.forEach(linha => {
       const cod = _norm(linha[0]);
-      const obs = String(linha[8]).trim(); 
-      if (cod && obs) mapObservacoesSalvas.set(cod, obs);
-    });
-
-    // --- LEITURA ---
-    const rangeEntrada = abaMutirao.getRange(2, 1, lastRowMult - 1, 3).getValues();
-    const setCodigos = new Set();
-    const mapaInfoManual = new Map();
-
-    rangeEntrada.forEach(linha => {
-      const cod = _norm(linha[0]);
+      // Coluna D (Indice 3) é a Qtd Solicitada
+      const qtd = linha[3]; 
+      // Coluna K (Indice 10) é a Obs
+      const obs = String(linha[10]).trim(); 
+      
       if (cod) {
-        setCodigos.add(cod);
-        mapaInfoManual.set(cod, { descExistente: String(linha[1]).trim(), qtdUso: linha[2] });
+        if (obs) mapObservacoesSalvas.set(cod, obs);
+        if (qtd !== "" && qtd != null) mapQtdSolicitada.set(cod, qtd);
       }
     });
 
-    if (setCodigos.size === 0) { ui.alert("Nenhum código válido."); return; }
+    // --- 2. LEITURA DOS CÓDIGOS DE ENTRADA (Coluna A) ---
+    const rangeEntrada = abaMutirao.getRange(2, 1, lastRowMult - 1, 1).getValues();
+    const setCodigos = new Set();
+    
+    rangeEntrada.forEach(linha => {
+      const cod = _norm(linha[0]);
+      if (cod) setCodigos.add(cod);
+    });
 
-    // --- DADOS ---
+    if (setCodigos.size === 0) { ui.alert("Nenhum código válido na Coluna A."); return; }
+
+    // --- 3. BUSCA PREÇO UNITÁRIO (ÚLTIMA ENTRADA) ---
+    const mapaPrecos = _buscarUltimosPrecos(setCodigos);
+
+    // --- 4. DADOS DE ESTOQUE (Aba 'dados') ---
     const lastRowDados = abaDados.getLastRow();
     const mapaDados = new Map();
     if (lastRowDados >= 5) {
@@ -133,29 +141,14 @@ function executarMutiraoComContexto(tipoOrigem) {
            d.estoqueTotal += (parseFloat(linha[6]) || 0); 
            if (linha[2]) d.descricaoSet.add(String(linha[2]).trim());
            
-           // --- CORREÇÃO DE LÓGICA (NOTES vs AE) ---
-           // Regra: Começa com 1 é AE. Começa com 6 é Note.
-           
-           // Verificação da Coluna 15 (P) - Originalmente Notes
            if (linha[15]) {
              const valP = String(linha[15]).trim();
-             if (valP.startsWith("1")) {
-                d.aeSet.add(valP); // Move para AE se começar com 1
-             } else {
-                d.notesSet.add(valP); // Mantém em Notes (começa com 6 ou texto)
-             }
+             if (valP.startsWith("1")) d.aeSet.add(valP); else d.notesSet.add(valP);
            }
-
-           // Verificação da Coluna 20 (U) - Originalmente AE
            if (linha[20]) {
              const valU = String(linha[20]).trim();
-             if (valU.startsWith("6")) {
-                d.notesSet.add(valU); // Move para Notes se começar com 6
-             } else {
-                d.aeSet.add(valU); // Mantém em AE (começa com 1 ou texto)
-             }
+             if (valU.startsWith("6")) d.notesSet.add(valU); else d.aeSet.add(valU);
            }
-           // ----------------------------------------
 
            if (linha[38]) d.processosSet.add(String(linha[38]).trim());
            const saldoAtual = parseFloat(linha[33]) || 0;
@@ -165,7 +158,7 @@ function executarMutiraoComContexto(tipoOrigem) {
       }
     }
 
-    // --- COMPILADOS ---
+    // --- 5. COMPILADOS (Empenhos) ---
     const lastRowComp = abaCompilados.getLastRow();
     const mapaEmpenhos = new Map();
     if (lastRowComp >= 2) {
@@ -180,7 +173,7 @@ function executarMutiraoComContexto(tipoOrigem) {
       }
     }
 
-    // --- EXTERNA ---
+    // --- 6. EXTERNA (Planejadores) ---
     const mapaPlanejadores = new Map();
     try {
       const ssEquipe = SpreadsheetApp.openById(CONFIG.ids.painelEquipe);
@@ -201,32 +194,42 @@ function executarMutiraoComContexto(tipoOrigem) {
       });
     } catch (e) { console.warn("Erro busca externa: " + e.message); }
 
-    // --- MONTAGEM ---
+    // --- 7. MONTAGEM DOS DADOS ---
     const outputDados = [];      
     const outputDescricoes = []; 
+    const outputPrecos = [];
+    const outputQtdSolicitada = [];
+    const outputFormulasTotal = [];
     const outputObservacoes = []; 
     const listaCompletaEmail = []; 
 
-    rangeEntrada.forEach((linhaInput) => {
+    rangeEntrada.forEach((linhaInput, index) => {
       const codAtual = _norm(linhaInput[0]);
       if (!codAtual) { 
-        outputDados.push(["", "", "", "", ""]); 
-        outputDescricoes.push([""]); 
-        outputObservacoes.push([""]); 
+        // Empurra linhas vazias para manter alinhamento
+        outputDescricoes.push([""]);
+        outputPrecos.push([""]);
+        outputQtdSolicitada.push([""]);
+        outputFormulasTotal.push([""]);
+        outputDados.push(["", "", "", "", ""]);
+        outputObservacoes.push([""]);
         return; 
       }
 
-      const dadosManuais = mapaInfoManual.get(codAtual);
-      const qtdUsoFinal = dadosManuais.qtdUso !== "" ? dadosManuais.qtdUso : "-";
-      
       const info = mapaDados.get(codAtual) || { 
         estoqueTotal: 0, aeSet: new Set(), notesSet: new Set(),
         processosSet: new Set(), descricaoSet: new Set(), saldoAta: 0, vencAtaSet: new Set()
       };
       
-      let descricaoFinal = dadosManuais.descExistente;
-      if (info.descricaoSet.size > 0) descricaoFinal = Array.from(info.descricaoSet)[0];
-      if (!descricaoFinal) descricaoFinal = "Descrição não encontrada";
+      let descricaoFinal = Array.from(info.descricaoSet)[0] || "Descrição não encontrada";
+      
+      // Valores Financeiros
+      const precoUnit = mapaPrecos.get(codAtual) || 0;
+      const qtdSol = mapQtdSolicitada.has(codAtual) ? mapQtdSolicitada.get(codAtual) : "";
+      
+      // Fórmula OnEdit (Coluna E = C * D)
+      const linhaPlanilha = index + 2; // +2 porque começa na linha 2
+      const formulaTotal = `=IF(ISNUMBER(D${linhaPlanilha}); C${linhaPlanilha}*D${linhaPlanilha}; 0)`;
 
       const txtAE = Array.from(info.aeSet).join("\n");
       const txtNotes = Array.from(info.notesSet).join("\n");
@@ -236,7 +239,7 @@ function executarMutiraoComContexto(tipoOrigem) {
       const setPlan = mapaPlanejadores.get(codAtual) || new Set();
       const txtPlan = setPlan.size > 0 ? Array.from(setPlan).join(" / ") : "Não Encontrado";
 
-      // PREPARAÇÃO PARA PDF/EMAIL
+      // Formatação para Relatórios
       let txtAENotes = "";
       if (txtAE) txtAENotes += `📑 <b>AE:</b> ${txtAE}`;
       if (txtNotes) txtAENotes += (txtAENotes ? "<br>" : "") + `📝 <b>Notes:</b> ${txtNotes}`;
@@ -260,33 +263,30 @@ function executarMutiraoComContexto(tipoOrigem) {
         statusAta = "🚫 Sem Ata";
       }
 
-      // PREPARAÇÃO PARA EXCEL
-      let xlAENotes = "";
-      if (txtAE) xlAENotes += `[AE] ${txtAE}`;
-      if (txtNotes) xlAENotes += (xlAENotes ? "\n" : "") + `[NOTES] ${txtNotes}`;
-      if (!xlAENotes) xlAENotes = "-";
-      
-      let xlAta = "";
-      if (info.saldoAta > 0 || (txtVencimento && txtVencimento.length > 5)) {
-        xlAta = `Saldo: ${info.saldoAta}\nVence: ${txtVencimento}`;
-      } else { xlAta = "Sem Ata"; }
+      let xlAta = (info.saldoAta > 0) ? `Saldo: ${info.saldoAta}\nVence: ${txtVencimento}` : "Sem Ata";
+      let xlAENotes = (txtAE ? `[AE] ${txtAE}\n` : "") + (txtNotes ? `[NOTES] ${txtNotes}` : "");
 
       const obsFinal = mapObservacoesSalvas.get(codAtual) || "";
       
       outputDescricoes.push([descricaoFinal]); 
+      outputPrecos.push([precoUnit]);
+      outputQtdSolicitada.push([qtdSol]);
+      outputFormulasTotal.push([formulaTotal]);
+      
+      // Colunas F a J
       outputDados.push([txtAE, txtEmp, info.estoqueTotal, txtProc, txtPlan]); 
       outputObservacoes.push([obsFinal]); 
 
       listaCompletaEmail.push({
         codigo: codAtual,
         descricao: descricaoFinal, 
-        qtdUso: qtdUsoFinal,
+        preco: precoUnit,
+        qtdSol: qtdSol,
         estoque: info.estoqueTotal,
         ata: statusAta,            
         empenho: txtEmpenhoFinal,
         aeNotes: txtAENotes,
         processos: txtProcFinal,
-        // Versões Limpas para Excel
         xlAta: xlAta,
         xlEmpenho: txtEmp,
         xlAENotes: xlAENotes,
@@ -294,28 +294,62 @@ function executarMutiraoComContexto(tipoOrigem) {
       });
     });
 
-    // --- ESCRITA ---
+    // --- 8. ESCRITA NA PLANILHA ---
+    // Limpa a área de dados (mantendo coluna A intacta)
+    // Colunas B a K (Indices 2 a 11)
+    abaMutirao.getRange(2, 2, abaMutirao.getMaxRows(), 10).clearContent();
+
     if (outputDados.length > 0) {
-      abaMutirao.getRange(2, 2, outputDescricoes.length, 1).setValues(outputDescricoes);
-      abaMutirao.getRange(2, 4, abaMutirao.getLastRow(), 5).clearContent();
-      const rangeDestino = abaMutirao.getRange(2, 4, outputDados.length, 5);
-      rangeDestino.setValues(outputDados);
-      rangeDestino.setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
-      rangeDestino.setVerticalAlignment("middle");
-      abaMutirao.getRange(2, 6, outputDados.length, 1).setNumberFormat("#,##0");
-      abaMutirao.getRange(2, 9, outputObservacoes.length, 1).setValues(outputObservacoes);
+      const numLinhas = outputDados.length;
+
+      // Coluna B: Descrição
+      abaMutirao.getRange(2, 2, numLinhas, 1).setValues(outputDescricoes);
+      
+      // Coluna C: Valor Unitário
+      abaMutirao.getRange(2, 3, numLinhas, 1).setValues(outputPrecos).setNumberFormat("R$ #,##0.00");
+      
+      // Coluna D: Qtd Solicitada
+      abaMutirao.getRange(2, 4, numLinhas, 1).setValues(outputQtdSolicitada).setNumberFormat("#,##0");
+      
+      // Coluna E: Valor Total (Fórmula)
+      abaMutirao.getRange(2, 5, numLinhas, 1).setFormulas(outputFormulasTotal).setNumberFormat("R$ #,##0.00").setFontWeight("bold");
+
+      // Colunas F a J: Dados Gerais
+      const rangeGeral = abaMutirao.getRange(2, 6, numLinhas, 5);
+      rangeGeral.setValues(outputDados);
+      rangeGeral.setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
+      rangeGeral.setVerticalAlignment("middle");
+      
+      // Estoque (Coluna H -> Indice 8)
+      abaMutirao.getRange(2, 8, numLinhas, 1).setNumberFormat("#,##0");
+
+      // Coluna K: Observações
+      abaMutirao.getRange(2, 11, numLinhas, 1).setValues(outputObservacoes);
+
+      // --- CABEÇALHOS (GARANTIA) ---
+      const headers = ["Código", "Descrição", "Valor Unitário", "Qtd. Total Solicitada", "Valor Total Solicitado", "AE / Notes", "Empenho", "Estoque", "Processos", "Planejador", "Observações"];
+      abaMutirao.getRange(1, 1, 1, 11).setValues([headers])
+        .setFontWeight("bold")
+        .setBackground(COR_TITULO)
+        .setFontColor("white")
+        .setHorizontalAlignment("center");
+        
+      abaMutirao.setColumnWidth(2, 300); // Desc
+      abaMutirao.setColumnWidth(3, 100); // Preço
+      abaMutirao.setColumnWidth(4, 100); // Qtd
+      abaMutirao.setColumnWidth(5, 120); // Total
 
       if (listaCompletaEmail.length > 0) {
         const resp = ui.alert(
           "Concluído", 
-          `Dados do ${NOME_ABA_TRABALHO} atualizados!\n\nDeseja enviar o E-MAIL (Com PDF + Excel)?`,
+          `Status Report Atualizado!\nNovas Colunas Financeiras Adicionadas.\n\nDeseja enviar o E-MAIL (PDF + Excel)?`,
           ui.ButtonSet.YES_NO
         );
 
         if (resp === ui.Button.YES) {
           enviarEmailComAnexos(listaCompletaEmail, NOME_CONTEXTO, COR_TITULO);
         } else {
-          ui.alert("Ok, e-mail não enviado.");
+          ui.alert("Ok, planilha atualizada. E-mail não enviado.");
         }
       }
     }
@@ -323,7 +357,59 @@ function executarMutiraoComContexto(tipoOrigem) {
 }
 
 /**
- * FUNÇÃO 3: Gera PDF + Excel e envia E-mail
+ * FUNÇÃO AUXILIAR: Busca Preços na Fonte Global
+ */
+function _buscarUltimosPrecos(setCodigos) {
+  const mapa = new Map();
+  try {
+    const dados = obterDadosEntradasGlobal(); // Já vem do 03_Helpers.js
+    
+    // Varre todos os dados globais
+    dados.forEach(linha => {
+      // Coluna C (Index 2) = Código
+      // Coluna I (Index 8) = Valor
+      // Coluna O (Index 14) = Data Recebimento
+      
+      const cod = _norm(linha[2]);
+      if (setCodigos.has(cod)) {
+        const valor = parseFloat(linha[8]) || 0;
+        const dataRaw = linha[14];
+        let dataRec = null;
+
+        if (dataRaw instanceof Date) {
+          dataRec = dataRaw;
+        } else if (typeof dataRaw === 'string') {
+          dataRec = _parseDataSegura(dataRaw);
+        }
+
+        if (dataRec && valor > 0) {
+          // Se já tem preço salvo, verifica se a data atual é mais recente
+          if (mapa.has(cod)) {
+            const anterior = mapa.get(cod);
+            if (dataRec > anterior.data) {
+              mapa.set(cod, { valor: valor, data: dataRec });
+            }
+          } else {
+            mapa.set(cod, { valor: valor, data: dataRec });
+          }
+        }
+      }
+    });
+
+  } catch (e) {
+    console.error("Erro ao buscar preços: " + e.message);
+  }
+
+  // Retorna apenas Mapa simplificado: Cod -> Valor
+  const mapaFinal = new Map();
+  for (let [k, v] of mapa) {
+    mapaFinal.set(k, v.valor);
+  }
+  return mapaFinal;
+}
+
+/**
+ * FUNÇÃO 3: Gera PDF + Excel e envia E-mail (ATUALIZADA)
  */
 function enviarEmailComAnexos(listaItens, nomeContexto, corTitulo) {
   const isTeste = CONFIG_EMAILS_MUTIRAO.MODO_TESTE;
@@ -335,24 +421,29 @@ function enviarEmailComAnexos(listaItens, nomeContexto, corTitulo) {
     <thead>
       <tr>
         <th width="8%">Cód.</th>
-        <th width="22%">Descrição</th>
-        <th width="5%" style="text-align: center;">Qtd</th>
-        <th width="5%" style="text-align: center;">Est</th>
+        <th width="20%">Descrição</th>
+        <th width="8%" style="text-align: right;">Unitário</th>
+        <th width="5%" style="text-align: center;">Qtd Sol.</th>
+        <th width="5%" style="text-align: center;">Estoque</th>
         <th width="12%">Cobertura</th>
-        <th width="13%">Empenho</th>
+        <th width="12%">Empenho</th>
         <th width="15%">AE / Notes</th>
-        <th width="20%">Processos</th>
+        <th width="15%">Processos</th>
       </tr>
     </thead>
   `;
 
   let tableRows = "<tbody>";
   listaItens.forEach(item => {
+    // Formatação de Moeda para o PDF
+    const precoFmt = item.preco ? item.preco.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'}) : '-';
+    
     tableRows += `
       <tr>
         <td><strong>${item.codigo}</strong></td>
-        <td>${item.descricao.substring(0, 90)}${item.descricao.length > 90 ? '...' : ''}</td>
-        <td style="text-align: center;">${item.qtdUso}</td>
+        <td>${item.descricao.substring(0, 90)}</td>
+        <td style="text-align: right;">${precoFmt}</td>
+        <td style="text-align: center;"><b>${item.qtdSol || '-'}</b></td>
         <td style="text-align: center;">${item.estoque}</td>
         <td>${item.ata}</td>
         <td>${item.empenho.replace(/\n/g, "<br>")}</td>
@@ -367,12 +458,11 @@ function enviarEmailComAnexos(listaItens, nomeContexto, corTitulo) {
     <head>
       <style>
         @page { size: landscape; margin: 10mm; }
-        body { font-family: Arial, sans-serif; font-size: 11px; color: #333; }
+        body { font-family: Arial, sans-serif; font-size: 10px; color: #333; }
         h2 { background-color: ${corTitulo}; color: white; padding: 8px; text-align: center; margin-bottom: 10px; }
         table { width: 100%; border-collapse: collapse; }
-        th, td { border: 1px solid #ccc; padding: 5px; text-align: left; vertical-align: top; }
-        th { background-color: #f2f2f2; font-weight: bold; font-size: 11px; }
-        td { font-size: 11px; }
+        th, td { border: 1px solid #ccc; padding: 4px; text-align: left; vertical-align: top; }
+        th { background-color: #f2f2f2; font-weight: bold; }
         thead { display: table-header-group; }
         tr { page-break-inside: avoid; }
       </style>
@@ -393,14 +483,17 @@ function enviarEmailComAnexos(listaItens, nomeContexto, corTitulo) {
     const tempSS = SpreadsheetApp.create("Temp_Export");
     const sheet = tempSS.getSheets()[0];
     
-    const headers = ["Código", "Descrição", "Qtd Uso", "Estoque", "Cobertura/Ata", "Empenho", "AE / Notes", "Processos"];
+    const headers = ["Código", "Descrição", "Valor Unit.", "Qtd Solicitada", "Valor Total", "Estoque", "Cobertura/Ata", "Empenho", "AE / Notes", "Processos"];
     const dadosExcel = [headers];
     
     listaItens.forEach(item => {
+      const total = (item.preco && item.qtdSol) ? (item.preco * item.qtdSol) : 0;
       dadosExcel.push([
         item.codigo,
         item.descricao,
-        item.qtdUso,
+        item.preco,
+        item.qtdSol,
+        total,
         item.estoque,
         item.xlAta,       
         item.xlEmpenho,   
@@ -411,8 +504,9 @@ function enviarEmailComAnexos(listaItens, nomeContexto, corTitulo) {
 
     sheet.getRange(1, 1, dadosExcel.length, headers.length).setValues(dadosExcel);
     sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold").setBackground("#d9d9d9");
-    sheet.getRange(1, 1, dadosExcel.length, headers.length).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP).setVerticalAlignment("top");
-    sheet.setColumnWidths(1, 8, 120); 
+    sheet.getRange(2, 3, dadosExcel.length, 1).setNumberFormat("R$ #,##0.00");
+    sheet.getRange(2, 5, dadosExcel.length, 1).setNumberFormat("R$ #,##0.00");
+    
     SpreadsheetApp.flush();
 
     const url = "https://docs.google.com/spreadsheets/d/" + tempSS.getId() + "/export?format=xlsx";
@@ -432,7 +526,7 @@ function enviarEmailComAnexos(listaItens, nomeContexto, corTitulo) {
   let htmlEmail = `
     <div style="font-family: Arial, sans-serif; color: #333;">
       <p>Prezados,</p>
-      <p>Segue abaixo a relação atualizada do <strong>${nomeContexto}</strong>.</p>
+      <p>Segue abaixo a relação atualizada do <strong>${nomeContexto}</strong> com valores atualizados.</p>
       <p><em>(Em anexo: Versão PDF para impressão e Planilha Excel para edição).</em></p>
       <hr>
       ${htmlContent} 
