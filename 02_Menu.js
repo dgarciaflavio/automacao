@@ -1,5 +1,5 @@
 // =================================================================
-// --- BLOCO 2: MENU PRINCIPAL (ATUALIZADO PARA STATUS REPORT) ---
+// --- BLOCO 2: MENU PRINCIPAL (ATUALIZADO PARA STATUS REPORT & CONTINGÊNCIA) ---
 // =================================================================
 
 function onOpen() {
@@ -37,7 +37,8 @@ function onOpen() {
         .addItem('📊 Dashboard de Status', 'gerarDashboardStatus'))
     .addSeparator()
     .addSubMenu(SpreadsheetApp.getUi().createMenu('📑 Relatórios Operacionais')
-        // MUDANÇA AQUI:
+        // NOVAS FUNCIONALIDADES AQUI:
+        .addItem('🚨 Executar Operação Contingência', 'executarOperacaoContingencia') // <--- NOVO
         .addItem('Atualizar Status Report', 'processarMutirao') 
         .addItem('Rel. Validade de Atas (Filtrar L1/M1)', 'gerarRelatorioValidadeAtas')
         .addItem('Rel. Valor Resíduo 10%', 'gerarRelatorioResiduo10')
