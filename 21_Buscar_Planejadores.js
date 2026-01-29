@@ -1,5 +1,5 @@
 // =================================================================
-// --- BLOCO 21: BUSCA REMOTA AVANÇADA (COM LINK DIRETO) ---
+// --- BLOCO 21: BUSCA REMOTA AVANÇADA (COM CORREÇÃO DE CONFIG) ---
 // =================================================================
 
 function localizarItemNoPainelEquipe() {
@@ -24,8 +24,22 @@ function localizarItemNoPainelEquipe() {
   toast("Varrendo planilha da equipe...");
 
   try {
-    // 2. Conexão Remota
-    const idPainel = CONFIG.ids.painelEquipe; // Pega do Config.js
+    // 2. Conexão Remota (COM PROTEÇÃO CONTRA ERRO 'CONFIG NOT DEFINED')
+    let idPainel;
+    try {
+      // Tenta usar o CONFIG global
+      if (typeof CONFIG !== 'undefined') {
+        idPainel = CONFIG.ids.painelEquipe;
+      } else {
+        throw new Error("Config não carregado");
+      }
+    } catch (e) {
+      // Fallback: Busca direto nas propriedades se o CONFIG falhar
+      idPainel = PropertiesService.getScriptProperties().getProperty('ID_PAINEL_EQUIPE');
+    }
+
+    if (!idPainel) throw new Error("ID do Painel de Equipe não encontrado nas configurações.");
+
     const ssRemota = SpreadsheetApp.openById(idPainel);
     const abas = ssRemota.getSheets();
     
