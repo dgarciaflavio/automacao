@@ -1,208 +1,181 @@
 /**
  * ============================================================================
- * 📘 DOCUMENTAÇÃO TÉCNICA - ORQUESTRADOR GERAL (SISTEMA DE GESTÃO INCA)
+ * 📘 MANUAL TÉCNICO ANALÍTICO - ORQUESTRADOR GERAL (SISTEMA INCA)
  * ============================================================================
- * * @project  Orquestrador de Estoque, Empenhos e Distribuição
+ * @project  Orquestrador de Estoque, Empenhos, Distribuição e Inteligência
  * @author   Flavio Garcia Diniz
- * @version  12.0 (Documentação Definitiva "Sem Economia de Palavras")
- * @date     2026-01-16
- * * ============================================================================
- * 🎯 VISÃO GERAL DO SISTEMA
+ * @version  15.0 (Edição Definitiva "Caixa Preta Aberta")
+ * @date     2026-01-29
+ * * ESTE DOCUMENTO DESCREVE EXAUSTIVAMENTE A LÓGICA, CÁLCULOS E FLUXOS DO SISTEMA.
+ * NÃO HÁ RESUMOS. CADA MÓDULO É EXPLICADO EM SEU NÍVEL DE ENGENHARIA.
  * ============================================================================
- * Este ecossistema de automação (Orquestrador) atua como o "Cérebro Central" 
- * da logística. Ele não apenas processa dados, mas conecta 6 bases de dados 
- * distintas (Planilhas Google) para garantir que a informação de Materiais, 
- * Medicamentos, Estoque e Financeiro esteja sincronizada em tempo real.
- * * O sistema foi construído em arquitetura modular (Blocos 01 a 20) para 
- * permitir manutenção isolada sem quebrar o todo.
+ * * 🏗️ ARQUITETURA DE DADOS E CONEXÕES
+ * ============================================================================
+ * O sistema opera sob uma arquitetura de "Hub & Spoke" (Centro e Raios).
+ * O script não processa dados isolados; ele cruza informações de 6 bancos de dados distintos
+ * em tempo real para gerar uma "Única Fonte de Verdade".
+ * * 1. FONTE DE DADOS GERAL (EMS - ID: 1s44YD...):
+ * - A "Verdade Absoluta" financeira e logística extraída do ERP.
+ * - Filtro de Otimização: O script aplica um filtro rígido (Data >= 2023) na memória RAM.
+ * Dados anteriores a 2023 são descartados na leitura para evitar estouro de tempo (Timeout),
+ * garantindo que o processamento foque apenas na gestão atual.
+ * * 2. MATERIAIS (Remoto - ID: 1jXd...): Entrada manual da equipe de Almoxarifado.
+ * 3. MEDICAMENTOS (Remoto - ID: 16_jA...): Entrada manual da equipe de Farmácia.
+ * 4. CORREÇÃO EXTERNA (ID: 1r8l...): Base de auditoria para divergências.
+ * 5. COMPILADOS (Local - ID: 1ZLe...): O Hub onde este script reside.
+ * 6. PAINEL EQUIPE (ID: 1Rc5...): Saída de dados para os planejadores (Bianca, Katia, etc.).
  * * ============================================================================
- * 📂 DETALHAMENTO PROFUNDO DOS MÓDULOS (ARQUIVOS)
+ * 🧠 MOTOR DE INTELIGÊNCIA E LÓGICA (O CÉREBRO)
  * ============================================================================
  * * ----------------------------------------------------------------------------
- * 1. 01_Config.js (O Mapa do Tesouro)
+ * A. O ALGORITMO DE STATUS UNIFICADO (_calcularStatusUnificado em 03_Helpers.js)
  * ----------------------------------------------------------------------------
- * - **Função:** É o arquivo mais crítico do sistema. Ele armazena as chaves de acesso (IDs)
- * e configurações globais. Se uma planilha mudar, é aqui que corrigimos.
- * - **Fontes de Dados Conectadas (IDs Reais):**
- * 1. **Materiais:** `1jXd4uEnyGZvLv4ozDfFi5ZMlumw0TvleGdMKlgGcPtU`
- * - Onde a equipe de Materiais lança os empenhos manuais.
- * 2. **Medicamentos:** `16_jA8i4zOKqgXDUdOyelrE0zMTGR27RaYQjZdlSInOE`
- * - Onde a equipe de Farmácia lança seus controles.
- * 3. **Fonte de Dados Geral (EMS):** `1s44YD2ozLAbBdGQbBE5iW7HcUzvQULZqd4ynYlV_HXA`
- * - A "Verdade Absoluta" extraída do sistema ERP (EMS). Contém todas as entradas oficiais.
- * 4. **Correção Externa:** `1r8lYhlCecGTKlx7hSM3Fj6KFQqyt1JYKTfQ7HGGj6Zc`
- * - Usada para auditoria de divergências entre o sistema e o controle manual.
- * 5. **Compilados (Local):** `1ZLebBqhR1bMZgrnr_dfXikyIY22oi0B2pqXDz1UdRZM`
- * - A planilha onde este script roda. É o "Hub" que recebe tudo.
- * 6. **Painel de Equipe:** `1Rc5fUr-nP3g8SU9083Y-N83QZtg2wMCMlmlwcXJYl9k`
- * - Planilha externa onde Bianca, Katia, Leonardo, etc., recebem suas tarefas.
- * - **Paleta de Cores:** Define hexadecimalmente as cores de status (ex: Pendente = #f4cccc).
+ * Esta é a função mais crítica do sistema. Ela decide o estado de um item baseada
+ * em 4 variáveis: Qtd Empenhada (E), Saída Oficial (SO), Saldo Físico (SF) e Flag Provisório (P).
+ * * A hierarquia de decisão (IF/ELSE) é estrita e segue esta ordem:
+ * * 1. RECEBIDO A MAIOR (Erro Grave):
+ * - Lógica: SE (E > 0) E (SO > E).
+ * - Significado: O sistema registra mais entregas do que o comprado. Bloqueia pagamento.
+ * * 2. CONCLUÍDO (Sucesso):
+ * - Lógica: SE (E > 0) E (SO == E).
+ * - Significado: A entrega oficial bateu exatamente com o empenho. Processo encerrado.
+ * * 3. ERRO DE CADASTRO (Recebido s/ Associação):
+ * - Lógica: SE (E == 0) E (SO > 0).
+ * - Significado: O item entrou no almoxarifado, mas alguém esqueceu de lançar o empenho na planilha.
+ * * 4. ITEM FANTASMA (Solicitar Associação):
+ * - Lógica: SE (E == 0) E (SO == 0).
+ * - Significado: Item listado mas sem nenhuma movimentação ou registro válido.
+ * * 5. LÓGICA HÍBRIDA (Oficial vs Físico/Provisório):
+ * - O sistema prioriza a Nota Fiscal (Oficial). Porém, a mercadoria chega antes da nota.
+ * - SE (Flag Provisório Existe) E (SO == 0):
+ * - O sistema entra em "Modo Físico". Ele ignora que o oficial é zero.
+ * - Sub-regra: SE (Saldo Físico <= 10% do Empenho): Status = "Resíduo 10%".
+ * - Sub-regra: SE (Saldo Físico > 0): Status = "Recebimento Provisório".
+ * - IMPORTANTE: Assim que (SO > 0), o sistema AUTOMATICAMENTE sai do modo provisório
+ * e assume o status oficial, prevenindo duplicidade de contagem.
+ * * 6. PENDÊNCIA E RESÍDUO TÉCNICO:
+ * - SE (SO == 0) E (SF == E): Status = "Pendente" (Nada chegou).
+ * - SE (SF > 10% de E): Status = "Pendente com Resíduo" (Chegou parte, falta muito).
+ * - SE (SF > 0 e SF <= 10% de E): Status = "Resíduo 10%" (Considerado entregue contabilmente).
+ * * ============================================================================
+ * 📂 DETALHAMENTO ANALÍTICO POR MENU (FUNCIONALIDADES)
+ * ============================================================================
  * * ----------------------------------------------------------------------------
- * 2. 02_Menu.js (A Interface)
+ * MENU 1: CICLO COMPLETO (`04_Ciclo_Completo.js`)
  * ----------------------------------------------------------------------------
- * - **Função:** Cria o menu visual "🚀 Orquestrador Geral" na barra superior.
- * - **Estrutura:** Organiza as 15+ funções do sistema em categorias lógicas para o usuário:
- * - Execução Master (Ciclo Completo).
- * - Processamentos Individuais (Remoto vs Local).
- * - Inteligência (BI, Snapshots).
- * - Operacional (Relatórios de Atas, PDF).
+ * - Função: Orquestração síncrona de atualização.
+ * - Segurança: Exige senha administrativa (armazenada em ScriptProperties) para evitar execução acidental.
+ * - Fluxo de Dados:
+ * 1. Leitura Global: Carrega ~50.000 linhas do EMS na RAM (filtradas por ano >= 2023).
+ * 2. Injeção Remota: Envia os dados processados para as planilhas de Materiais e Medicamentos.
+ * - Isso garante que as planilhas satélites vejam o status real antes da compilação.
+ * 3. Compilação Reversa: Puxa os dados atualizados das satélites de volta para a Local.
+ * 4. Sincronização de Estoque: Recalcula coberturas e sugestões de compra.
+ * - Por que essa ordem? Para garantir integridade referencial. O local só é atualizado
+ * depois que o remoto confirmou o recebimento dos dados globais.
  * * ----------------------------------------------------------------------------
- * 3. 03_Helpers.js (O Motor Lógico & Filtro)
+ * MENU 2 & 3: PROCESSAMENTO REMOTO (`05_Materiais` e `06_Medicamentos`)
  * ----------------------------------------------------------------------------
- * - **Função:** Contém a "Inteligência" matemática do sistema.
- * - **Destaque: `obterDadosEntradasGlobal()`**
- * - Conecta na planilha Fonte de Dados (`1s44YD...`).
- * - **Otimização:** Aplica um filtro de data (`>= 2023`). Dados anteriores a este ano
- * são descartados da memória RAM instantaneamente, garantindo performance e evitando
- * estouro de tempo limite.
- * - **Destaque: `_calcularStatusUnificado()` (As 8 Regras de Ouro)**
- * Esta função decide o destino de cada empenho:
- * 1. **Recebido a Maior:** Se (Qtd Entregue > Qtd Empenho). Erro grave.
- * 2. **Concluído:** Se (Qtd Entregue == Qtd Empenho). Sucesso.
- * 3. **Falta Associar EMS:** Se (Qtd Empenho == 0) mas (Qtd Entregue > 0). Erro de cadastro.
- * 4. **Solicitar Associação:** Se não tem empenho nem entrega. Item fantasma.
- * 5. **Recebimento Provisório:** Se consta na aba manual de provisórios E a entrega oficial é ZERO.
- * 6. **Pendente:** Se nada foi entregue.
- * 7. **Pendente com Resíduo:** Falta entregar, e o saldo é relevante (> 10%).
- * 8. **Resíduo 10%:** Falta entregar, mas é "mixaria" (Saldo <= 10%). Considera-se entregue.
+ * - Diferença Crucial: Materiais lida com locais 'ALM', 'MAI', '5x5'. Medicamentos lida com 'FAR' e códigos numéricos.
+ * - Cálculo de Atraso:
+ * - Data Limite = Data Envio do Empenho + 10 dias corridos.
+ * - SE (Hoje > Data Limite) E (Status != Concluído/Resíduo):
+ * - O script calcula os dias de atraso e escreve "X dias e Y meses" na célula.
+ * - Preservação de Dados:
+ * - O script lê as anotações manuais (Colunas J a N) antes de limpar a aba.
+ * - Ao reescrever os dados atualizados, ele "devolve" as anotações para as linhas corretas
+ * usando uma Chave Única composta por (NúmeroEmpenho + CódigoItem).
  * * ----------------------------------------------------------------------------
- * 4. 04_Ciclo_Completo.js (O Maestro Seguro)
+ * MENU 6: DISTRIBUIÇÃO DE EQUIPE (`16_Distribuicao_Equipe.js`)
  * ----------------------------------------------------------------------------
- * - **Função:** Executa tudo em ordem cronológica correta.
- * - **Segurança (Senha):** Antes de iniciar, exige a senha (`inca2026`). Isso impede
- * execuções acidentais por usuários não autorizados.
- * - **Sequência de Eventos:**
- * 1. **Leitura Otimizada:** Carrega a Fonte Global (Filtrada 2023+).
- * 2. **Escrita Remota 1:** Atualiza a planilha de Materiais (`1jXd...`).
- * 3. **Escrita Remota 2:** Atualiza a planilha de Medicamentos (`16_jA...`).
- * 4. **Compilação:** Puxa os dados das duas remotas de volta para a Local.
- * 5. **Estoque:** Sincroniza e recálcula a aba "Cont.Estoque".
+ * - Lógica de Atribuição Dinâmica:
+ * - Não existem "nomes fixos" no código (hardcoded).
+ * - O script lê a aba "Config_Equipe". Se você mudar a família "Saneantes" de "Bianca" para "Katia" lá,
+ * o script redireciona os itens na próxima execução automaticamente.
+ * - Cálculo de CMA Histórico (Consumo Médio Ajustado):
+ * - O sistema ignora a média simples. Ele analisa o histórico de 15 meses (anos 2022, 2023, 2025).
+ * - Fórmula: (Soma das Saídas dos últimos 3 anos / 3) / 12 * 15.
+ * - Objetivo: Suavizar a sazonalidade e projetar um consumo para 15 meses de segurança.
+ * - Detecção de Conflitos:
+ * - Se um item pertence à família X (Katia) mas o código específico está mapeado para Y (Rafaelle),
+ * o script duplica o item nas duas abas, pinta de VERMELHO e adiciona nota: "⚠️ COMPARTILHADO".
  * * ----------------------------------------------------------------------------
- * 5. 05_Materiais.js (Processamento Remoto)
+ * MENU INTELIGÊNCIA: ANÁLISE DE TENDÊNCIA (`23_Analise_Tendencia.js`) **[NOVO]**
  * ----------------------------------------------------------------------------
- * - **Alvo:** Planilha de Materiais (`1jXd...`).
- * - **Mecanismo:**
- * - Lê os empenhos manuais da aba "Empenhos Enviados".
- * - Cruza com a memória do EMS (Entradas Globais).
- * - Verifica a aba "Rec.Provisorio" local daquela planilha.
- * - Preserva anotações (colunas de Obs) feitas pela equipe.
- * - Filtra Locais: Só processa itens de 'ALM', 'MAI' ou '5x5'.
- * - **Matemática:** Usa `Math.round()` agressivamente para evitar que 14.00000001
- * seja diferente de 14.
+ * - Objetivo: Detectar "Aceleração" ou "Frenagem" de consumo antes que o estoque acabe.
+ * - Metodologia Matemática:
+ * 1. Calcula o Consumo Real dos últimos 30 dias (baseado na data de movimentação global).
+ * 2. Compara com o CMM (Média Histórica).
+ * 3. Fórmula de Desvio: (Consumo30d - CMM) / CMM.
+ * - Gatilhos de Alerta:
+ * - SE Desvio > +30%: Diagnóstico "🔥 Aceleração Alta". (Risco de ruptura iminente).
+ * - SE Desvio < -30%: Diagnóstico "❄️ Desaceleração". (Estoque parado/excesso).
+ * - Caso contrário: "Estável".
  * * ----------------------------------------------------------------------------
- * 6. 06_Medicamentos.js (Processamento Remoto)
+ * MENU ESTOQUE: GESTÃO E SUGESTÃO (`08_Gestao_Estoque.js`)
  * ----------------------------------------------------------------------------
- * - **Alvo:** Planilha de Medicamentos (`16_jA...`).
- * - **Diferença:** Foca em itens com local "FAR" ou códigos puramente numéricos.
- * - **Visual:** Aplica formatação condicional (cores) diretamente na planilha de destino
- * para que o farmacêutico veja os atrasos em vermelho instantaneamente.
+ * - Cálculo de Cobertura (Dias):
+ * - Fórmula: Estoque Atual / (CMM / 30).
+ * - Se CMM for 0: Retorna "Sem Consumo" ou "Zerado" (infinito técnico).
+ * - Cálculo de Sugestão de Compra (Meta 6 Meses) **[ATUALIZADO]**:
+ * - Meta de Estoque = CMM * 6.
+ * - Sugestão = Meta de Estoque - Estoque Atual.
+ * - Se o resultado for negativo (temos excesso), a sugestão é 0.
+ * - Previsão de Esgotamento Projetada:
+ * - Calcula a data futura onde o estoque chegará a zero SE a sugestão de compra for atendida.
+ * - Fórmula: Hoje + ((EstoqueAtual + Sugestão) / ConsumoDiario).
  * * ----------------------------------------------------------------------------
- * 7. 07_Compilacao_Local.js (O Funil)
+ * MENU OPERACIONAL: OPERAÇÃO CONTINGÊNCIA (`22_Operacao_Contingencia.js`) **[ATUALIZADO]**
  * ----------------------------------------------------------------------------
- * - **Função:** Traz a "Verdade" de volta para casa.
- * - **Fluxo:** Vai até as planilhas remotas (Mat e Med), copia o que foi processado
- * e cola na aba "Compilados" desta planilha.
- * - **Validação Dupla:** Re-executa a lógica de status localmente. Isso garante que,
- * mesmo se alguém mexer manualmente na planilha remota, o Painel Central (Compilados)
- * sempre mostrará o status calculado matematicamente correto.
+ * - Objetivo: Relatório de crise para itens com risco imediato de falta.
+ * - Critério de Seleção (Filtro Rígido):
+ * - Saldo em Dias (Coluna I da aba dados) <= 91 dias.
+ * - Lógica de Agrupamento:
+ * - O script agrupa os itens pelo "Processo SEI".
+ * - Tratativa de Exceção: Se o processo for vazio, "-", ou "0", o script renomeia para "Item sem processo"
+ * e força o responsável para "Não mapeado".
+ * - Enriquecimento Financeiro:
+ * - O script busca na Base Global a "Última Entrada" (maior data) daquele item.
+ * - Captura o Valor Unitário dessa entrada e insere no relatório para cálculo de custo de reposição.
+ * - Status Visual:
+ * - <= 30 dias: Status "CRÍTICO" (Vermelho).
+ * - 31 a 91 dias: Status "ALERTA" (Amarelo).
  * * ----------------------------------------------------------------------------
- * 8. 08_Gestao_Estoque.js (Cérebro de Suprimentos)
+ * MENU OPERACIONAL: STATUS REPORT / MUTIRÃO (`15_Mutirao.js`) **[ATUALIZADO]**
  * ----------------------------------------------------------------------------
- * - **Fontes:** Lê as planilhas remotas para saber quais empenhos estão "vivos" e a
- * aba local "dados" para pegar Estoque Atual e CMM (Consumo Médio Mensal).
- * - **Cálculos Avançados:**
- * 1. **Cobertura (Dias):** Estoque Atual / (CMM / 30).
- * 2. **Previsão de Esgotamento:** Data de Hoje + Dias de Cobertura.
- * 3. **Sugestão de Compra (Regra 6 Meses):**
- * - Meta = CMM * 6.
- * - Sugestão = Meta - Estoque Atual. (Se negativo, é zero).
- * 4. **Semáforo:**
- * - Crítico: < 2 meses de estoque.
- * - Atenção: 2 a 5 meses.
- * - Ok: > 5 meses ou sem consumo.
+ * - Funcionalidade: Ferramenta de trabalho para preenchimento de solicitações.
+ * - Automação Financeira (OnEdit Simulado):
+ * - O script injeta uma fórmula na Coluna E: `=IF(ISNUMBER(D2); C2*D2; 0)`.
+ * - Isso permite que o usuário digite a Qtd Solicitada (Col D) e o Valor Total (Col E)
+ * seja calculado instantaneamente pelo Sheets, sem precisar rodar o script novamente.
+ * - Busca de Preço Inteligente:
+ * - Varre a Base Global.
+ * - Para cada código, encontra a entrada com a data mais recente.
+ * - Preenche a Coluna C com esse "Último Preço Praticado".
+ * - Geração de Documentos:
+ * - Gera PDF (visualização limpa) e Excel (editável) contendo todas as colunas financeiras.
  * * ----------------------------------------------------------------------------
- * 9. 09_Relatorios_Locais.js (Ferramentas do Dia a Dia)
+ * MENU BI: RELATÓRIOS FINANCEIROS E PERFORMANCE (`14_Relatorios_BI.js`)
  * ----------------------------------------------------------------------------
- * - **Função:** Gera relatórios operacionais sob demanda.
- * 1. **Validade de Atas:** Lê datas em L1/M1 e busca itens cujas atas vencem no período.
- * 2. **Resíduo 10%:** Lista itens que sobraram "migalhas" para limpeza da base.
- * 3. **Atrasos > 10 Dias:** Varre a base, ignora itens "Concluídos" ou "Resíduo" e
- * lista quem está devendo há mais de 10 dias.
- * 4. **Lista:** Preenche automaticamente as colunas C a N da aba "Lista" baseado apenas
- * nos códigos digitados na coluna A.
- * * ----------------------------------------------------------------------------
- * 10. 10_Helpers_Relatorios.js (Apoio)
- * ----------------------------------------------------------------------------
- * - **Função:** Funções utilitárias para os relatórios.
- * - **Destaque:** `parseAtrasoParaDias()` - Converte texto humano como "1 mês e 5 dias"
- * para o número "35", permitindo cálculos matemáticos de atraso.
- * * ----------------------------------------------------------------------------
- * 11. 11_Sincronizacao_Externa.js (Auditoria)
- * ----------------------------------------------------------------------------
- * - **Alvo:** Planilha de Correção (`1r8l...`).
- * - **Função:** Compara o que temos no controle manual com o que existe no EMS (`1s44YD...`).
- * - **Diagnóstico:** Aponta "Itens Faltantes" (estão no sistema mas esquecemos de lançar)
- * e "Códigos Errados" (digitamos errado no manual). Permite envio automático da correção.
- * * ----------------------------------------------------------------------------
- * 12. 12_Dashboard.js (Visualização)
- * ----------------------------------------------------------------------------
- * - **Função:** Gera a aba "Dashboard".
- * - **Mecanismo:** Conta via script a frequência de cada status na aba "Compilados"
- * e desenha um Gráfico de Pizza 3D nativo do Google Sheets.
- * * ----------------------------------------------------------------------------
- * 13. 13_Relatorio_Email.js (Reporte Automático)
- * ----------------------------------------------------------------------------
- * - **Função:** Envia e-mail para chefia (`CONFIG.emails`).
- * - **Formato:** Gera um HTML limpo com tabela de resumo (Pendentes vs Concluídos)
- * e envia via GmailApp.
- * * ----------------------------------------------------------------------------
- * 14. 14_Relatorios_BI.js (Business Intelligence)
- * ----------------------------------------------------------------------------
- * - **Função:** Análise Estratégica.
- * - **BI Fornecedores:** Cria um Ranking de "Inadimplência". Calcula % de itens entregues
- * vs itens atrasados por fornecedor.
- * - **BI Financeiro:** Solicita Ano Inicial/Final. Soma todo o valor empenhado (R$) e subtrai
- * o entregue para mostrar o "Passivo Financeiro" (quanto falta pagar).
- * * ----------------------------------------------------------------------------
- * 16. 16_Distribuicao_Equipe.js (Gestão Dinâmica)
- * ----------------------------------------------------------------------------
- * - **Alvo:** Painel de Equipe (`1Rc5fUr...`).
- * - **Inovação Dinâmica:** Não usa mais nomes "chumbados" no código. Lê a aba "Config_Equipe"
- * para saber quem cuida de qual Família.
- * - **CMA Híbrido:** Calcula a média de consumo somando dados históricos.
- * - **Coluna S (Híbrida):** Exibe o saldo em dias E a classificação (Crítico/Ok) na mesma célula.
- * - **Trava:** Impede duplicidade na configuração manual de CMM.
- * * ----------------------------------------------------------------------------
- * 17. 17_Extras_Snapshot_Cobranca.js (Automação de Cobrança)
- * ----------------------------------------------------------------------------
- * - **Snapshot:** Salva uma linha nova todo dia na aba "Historico_BI" com os totais do dia.
- * Permite criar gráficos de evolução temporal.
- * - **Cobrança:**
- * - Varre itens pendentes.
- * - Verifica se o atraso > 10 dias.
- * - Verifica a coluna "Última Cobrança" (Col V). Se já cobrou há menos de 15 dias, ignora.
- * - Se elegível, cria um Rascunho no Gmail com texto padrão cobrando o fornecedor.
- * * ----------------------------------------------------------------------------
- * 18. 18_Controle_Mobile.js (Uso no Celular)
- * ----------------------------------------------------------------------------
- * - **Problema:** O App do Sheets no celular não mostra menus de script.
- * - **Solução:** Monitora checkboxes na aba "Painel_Mobile". Se o usuário marcar "TRUE",
- * o script detecta a edição (OnEdit) e dispara a função correspondente.
- * * ----------------------------------------------------------------------------
- * 19. 19_Gerador_PDF.js (Documentação)
- * ----------------------------------------------------------------------------
- * - **Função:** Gera PDFs profissionais para impressão.
- * - **Recursos:**
- * - Permite selecionar múltiplos status (ex: "Pendente" + "Recebido Parcial").
- * - Remove logos para layout limpo.
- * - Centraliza cabeçalhos.
- * - Salva o PDF no Drive e gera link para download imediato.
- * * ----------------------------------------------------------------------------
- * 20. 20_Logger_Hub.js (Segurança)
- * ----------------------------------------------------------------------------
- * - **Função:** Auditoria de acesso.
- * - **Mecanismo:** Toda vez que a planilha é aberta, registra: Data, Hora e E-mail do Usuário
- * na aba oculta "Log_Acesso_Hub".
- * - **Manutenção:** Mantém apenas os últimos 2000 registros para não pesar o arquivo.
+ * - Panorama Financeiro (Executivo):
+ * - Solicita Ano Inicial e Final.
+ * - Soma Empenhos (Passivo Total).
+ * - Subtrai Entregas (Passivo Baixado).
+ * - Calcula "Restos a Pagar" real (Passivo Líquido).
+ * - Separa o que é Pendência Real do que é Resíduo Técnico (<10%).
+ * - Performance de Fornecedores:
+ * - Métrica: (Total de Itens Pendentes / Total de Itens Empenhados).
+ * - Gera um ranking dos fornecedores com maior taxa de falha na entrega.
+ * * ============================================================================
+ * 🛡️ SEGURANÇA E AUDITORIA (`20_Logger_Hub.js` e `01_Config.js`)
+ * ============================================================================
+ * - Logger de Acesso:
+ * - Monitora silenciosamente quem abre a planilha.
+ * - Registra E-mail, Data e Hora na aba oculta "Log_Acesso_Hub".
+ * - Possui autolimpeza (mantém apenas os últimos 2000 acessos).
+ * - Validação de Conexões:
+ * - Ao iniciar, o script tenta "tocar" em todas as 6 planilhas conectadas.
+ * - Se algum ID estiver errado ou sem permissão, ele bloqueia a execução e alerta
+ * exatamente qual planilha falhou, prevenindo erros em cascata.
  * * ============================================================================
  */
