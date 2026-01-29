@@ -27,6 +27,7 @@ function onOpen() {
     .addSubMenu(SpreadsheetApp.getUi().createMenu('🧠 Inteligência & Automação')
         .addItem('📸 Salvar Snapshot (Histórico BI)', 'salvarSnapshotHistorico')
         .addItem('📨 Gerar Rascunhos de Cobrança (Gmail)', 'gerarRascunhosCobranca'))
+        .addItem('📈 Analisar Tendência de Consumo (Aceleração)', 'gerarRelatorioTendencia')
     .addSeparator()
     .addSubMenu(SpreadsheetApp.getUi().createMenu('💼 Relatórios Gerenciais (Chefia)')
         .addItem('🏆 Ranking de Fornecedores (Performance)', 'gerarRelatorioPerformanceFornecedores')
