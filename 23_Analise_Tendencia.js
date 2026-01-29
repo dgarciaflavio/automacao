@@ -1,5 +1,5 @@
 // =================================================================
-// --- BLOCO 23: ANÁLISE DE TENDÊNCIA (ACELERAÇÃO DE CONSUMO) ---
+// --- BLOCO 23: ANÁLISE DE TENDÊNCIA (CORRIGIDO: DESCRIÇÃO DA GUIA DADOS) ---
 // =================================================================
 
 function gerarRelatorioTendencia() {
@@ -13,19 +13,27 @@ function gerarRelatorioTendencia() {
     // 1. DADOS GLOBAIS (ENTRADAS/SAIDAS REAIS)
     const dados = obterDadosEntradasGlobal(); // Usa o helper existente
     
-    // 2. DADOS LOCAIS (PARA PEGAR O CMM ATUAL)
+    // 2. DADOS LOCAIS (PARA PEGAR O CMM E DESCRIÇÃO)
     const abaDados = ss.getSheetByName("dados");
     if (!abaDados) throw new Error("Aba 'dados' não encontrada.");
     
-    // Mapeia o CMM atual de cada item (Coluna B=Cod, Coluna H=CMM)
+    // Mapeia o CMM e a DESCRIÇÃO de cada item (Coluna B=Cod, Coluna C=Desc, Coluna H=CMM)
     const mapaCMM = new Map();
+    const mapaDescricoes = new Map(); // Mapa para guardar as descrições corretas
+    
     const lastRow = abaDados.getLastRow();
     if (lastRow >= 5) {
-      const v = abaDados.getRange(5, 1, lastRow - 4, 8).getValues(); // Até coluna H
+      // Pega até a coluna H (índice 8)
+      const v = abaDados.getRange(5, 1, lastRow - 4, 8).getValues(); 
       v.forEach(r => {
-        const cod = _norm(r[1]);
-        const cmm = parseFloat(r[7]) || 0; // Coluna H (Indice 7)
-        if (cod) mapaCMM.set(cod, cmm);
+        const cod = _norm(r[1]); // Coluna B
+        const desc = String(r[2]).trim(); // Coluna C (DESCRIÇÃO LOCAL)
+        const cmm = parseFloat(r[7]) || 0; // Coluna H
+        
+        if (cod) {
+            mapaCMM.set(cod, cmm);
+            mapaDescricoes.set(cod, desc); // Salva a descrição local
+        }
       });
     }
 
@@ -36,21 +44,14 @@ function gerarRelatorioTendencia() {
 
     const consumo30 = new Map();
     const consumo60 = new Map();
-    const descricoes = new Map();
 
     dados.forEach(r => {
-      // Estrutura do Global: Col A=Data, Col C=Cod, Col K=Qtd Empenhada (Entrada), Col M=Qtd Entregue (Saída?)
-      // ATENÇÃO: Precisamos confirmar qual coluna representa o "Consumo" (Saída do Estoque).
-      // Assumindo que o "CMM" é calculado com base nas saídas ou empenhos atendidos.
-      // Vou usar a Coluna M (Qtd Entregue/Processada) como proxy de movimentação real.
-      
+      // Estrutura do Global: Col A=Data, Col C=Cod, Col M=Qtd Entregue (Consumo)
       const dataMov = r[0]; // Coluna A
       const cod = _norm(r[2]); // Coluna C
       const qtdMov = parseFloat(r[12]) || 0; // Coluna M (Qtd Entregue - Proxy de Consumo/Giro)
       
       if (cod && dataMov instanceof Date) {
-        if (!descricoes.has(cod)) descricoes.set(cod, r[4]); // Coluna E (Descrição)
-
         if (dataMov >= data30dias) {
           consumo30.set(cod, (consumo30.get(cod) || 0) + qtdMov);
         }
@@ -85,9 +86,12 @@ function gerarRelatorioTendencia() {
       }
 
       if (status !== "Estável") {
+        // Agora pega a descrição do mapa local (Coluna C da guia dados)
+        const descricaoFinal = mapaDescricoes.get(cod) || "Descrição não encontrada";
+        
         relatorio.push([
           cod,
-          descricoes.get(cod) || "---",
+          descricaoFinal, // Usa a descrição correta
           cmm,
           qtd30,
           percentual,
@@ -123,6 +127,9 @@ function gerarRelatorioTendencia() {
     }
 
     abaRel.autoResizeColumns(1, 6);
+    // Força largura maior para a descrição
+    abaRel.setColumnWidth(2, 350); 
+    
     ui.alert(`Análise concluída!\n${relatorio.length} itens com anomalia de consumo detectados.`);
 
   } catch (e) {
