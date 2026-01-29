@@ -1,5 +1,5 @@
 // =================================================================
-// --- BLOCO 22: OPERAÇÃO CONTINGÊNCIA (ATUALIZADO: CORTE 91 DIAS) ---
+// --- BLOCO 22: OPERAÇÃO CONTINGÊNCIA (ATUALIZADO: COM PREÇO UNITÁRIO) ---
 // =================================================================
 
 function executarOperacaoContingencia() {
@@ -48,25 +48,28 @@ function executarOperacaoContingencia() {
     const lastRowDados = abaDados.getLastRow();
     const processosCriticos = new Set();
     const dadosItensPorProcesso = new Map();
+    const setCodigosParaPreco = new Set(); // Conjunto para buscar preços
 
-    // DEFINIÇÃO DO CORTE (Margem de segurança para decimais como 90,53)
     const DIAS_CORTE = 91; 
 
     if (lastRowDados >= 5) {
       const vDados = abaDados.getRange(5, 1, lastRowDados - 4, 39).getValues();
       vDados.forEach(linha => {
         const estoqueDias = parseFloat(linha[8]) || 0; // Coluna I (Saldo em dias)
-        let processo = String(linha[38]).trim();       // Coluna AM (Processo SEI)
+        
+        let processoRaw = linha[38] ? String(linha[38]) : "";
+        let processo = processoRaw.trim().replace(/\s+/g, " "); // Limpeza de espaços
+        
         const codItem = _norm(linha[1]);
 
-        // TRATAMENTO PARA ITENS SEM PROCESSO
-        if (!processo || processo === "-" || processo === "0") {
+        // TRATATIVA: Se for vazio, traço ou zero -> "Item sem processo"
+        if (!processo || processo === "-" || processo === "0" || processo === "") {
             processo = "Item sem processo";
         }
 
-        // AGORA ACEITA <= 91 DIAS
         if (codItem && estoqueDias <= DIAS_CORTE) {
           processosCriticos.add(processo);
+          setCodigosParaPreco.add(codItem); // Adiciona para busca de preço
           
           if (!dadosItensPorProcesso.has(processo)) {
             dadosItensPorProcesso.set(processo, []);
@@ -88,7 +91,11 @@ function executarOperacaoContingencia() {
       return;
     }
 
-    // 4. BUSCAR EMPENHOS (Compilados)
+    // 4. BUSCAR ÚLTIMOS PREÇOS (Nova Lógica)
+    toast("Buscando últimos preços praticados...");
+    const mapaPrecos = _buscarUltimosPrecosContingencia(setCodigosParaPreco);
+
+    // 5. BUSCAR EMPENHOS
     const lastRowComp = abaCompilados.getLastRow();
     const mapaEmpenhos = new Map();
     if (lastRowComp >= 2) {
@@ -103,17 +110,25 @@ function executarOperacaoContingencia() {
       });
     }
 
-    // 5. MONTAGEM DO RELATÓRIO
+    // 6. MONTAGEM DO RELATÓRIO
     const output = [];
+    // Novo Cabeçalho com Valor Unitário
     const cabecalho = [
-      "Processo SEI", "Responsável (Usuário)", "Código Item", "Descrição", 
-      "Estoque (Dias)", "Estoque (Qtd)", "AE / Notes", "Empenhos Pendentes", "Status"
+      "Processo SEI", 
+      "Responsável (Usuário)", 
+      "Código Item", 
+      "Descrição", 
+      "Valor Unit. (Último)", // <--- Nova Coluna E
+      "Estoque (Dias)", 
+      "Estoque (Qtd)", 
+      "AE / Notes", 
+      "Empenhos Pendentes", 
+      "Status"
     ];
 
     processosCriticos.forEach(proc => {
       const itens = dadosItensPorProcesso.get(proc);
       
-      // FORÇA "Não mapeado" SE FOR O CASO DE ITEM SEM PROCESSO
       let responsavel = "";
       if (proc === "Item sem processo") {
           responsavel = "Não mapeado";
@@ -121,17 +136,20 @@ function executarOperacaoContingencia() {
           responsavel = mapaProcUser.get(proc) || "Não mapeado";
       }
 
-      itens.forEach((it, index) => {
+      itens.forEach((it) => {
         const empenhos = (mapaEmpenhos.get(it.codigo) || []).join("\n");
+        const preco = mapaPrecos.get(it.codigo) || 0; // Pega o preço
+        
         let infoAENotes = "";
         if (it.ae) infoAENotes += `AE: ${it.ae}`;
         if (it.notes) infoAENotes += (infoAENotes ? "\n" : "") + `Note: ${it.notes}`;
 
         output.push([
-          index === 0 ? proc : "", 
-          index === 0 ? responsavel : "", 
+          proc,        
+          responsavel, 
           it.codigo,
           it.descricao,
+          preco, // <--- Valor Unitário
           it.estoqueDias,
           it.estoqueQtd,
           infoAENotes,
@@ -141,8 +159,9 @@ function executarOperacaoContingencia() {
       });
     });
 
-    // 6. ESCRITA NA ABA
+    // 7. ESCRITA NA ABA
     abaDestino.clear();
+    // Cabeçalho roxo, fonte branca
     abaDestino.getRange(1, 1, 1, cabecalho.length).setValues([cabecalho])
       .setFontWeight("bold").setBackground("#4c1130").setFontColor("white");
 
@@ -152,17 +171,14 @@ function executarOperacaoContingencia() {
       range.setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
       range.setVerticalAlignment("middle");
       
-      // Formatação Condicional de Status
-      const cores = output.map(r => {
-        const cor = r[8] === "CRÍTICO" ? "#ea9999" : "#ffe599";
-        return new Array(cabecalho.length).fill(cor);
-      });
-      range.setBackgrounds(cores);
+      // Formatação de Moeda na Coluna E (Índice 5)
+      abaDestino.getRange(2, 5, output.length, 1).setNumberFormat("R$ #,##0.00");
       
+      // Ajuste de Larguras
       abaDestino.autoResizeColumns(1, cabecalho.length);
       abaDestino.setColumnWidth(4, 300); // Descrição
-      abaDestino.setColumnWidth(7, 150); // AE/Notes
-      abaDestino.setColumnWidth(8, 200); // Empenhos
+      abaDestino.setColumnWidth(8, 150); // AE/Notes
+      abaDestino.setColumnWidth(9, 200); // Empenhos
     }
 
     ui.alert(`Operação Contingência concluída!\nItens analisados com corte de ${DIAS_CORTE} dias.`);
@@ -170,4 +186,72 @@ function executarOperacaoContingencia() {
   } catch (e) {
     ui.alert("Erro na Operação Contingência: " + e.message);
   }
+}
+
+/**
+ * FUNÇÃO AUXILIAR: Busca Preços na Fonte Global (Específica para Contingência)
+ */
+function _buscarUltimosPrecosContingencia(setCodigos) {
+  const mapa = new Map();
+  try {
+    const dados = obterDadosEntradasGlobal(); // Usa o helper global do arquivo 03_Helpers
+    
+    // Varre todos os dados globais
+    dados.forEach(linha => {
+      // Coluna C (Index 2) = Código
+      // Coluna I (Index 8) = Valor
+      // Coluna O (Index 14) = Data Recebimento
+      
+      const cod = _norm(linha[2]);
+      if (setCodigos.has(cod)) {
+        const valor = parseFloat(linha[8]) || 0;
+        const dataRaw = linha[14];
+        let dataRec = null;
+
+        if (dataRaw instanceof Date) {
+          dataRec = dataRaw;
+        } else if (typeof dataRaw === 'string') {
+          dataRec = _parseDataSegura(dataRaw);
+        }
+
+        if (dataRec && valor > 0) {
+          // Se já tem preço salvo, verifica se a data atual é mais recente (maior)
+          if (mapa.has(cod)) {
+            const anterior = mapa.get(cod);
+            if (dataRec > anterior.data) {
+              mapa.set(cod, { valor: valor, data: dataRec });
+            }
+          } else {
+            mapa.set(cod, { valor: valor, data: dataRec });
+          }
+        }
+      }
+    });
+
+  } catch (e) {
+    console.error("Erro ao buscar preços (Contingência): " + e.message);
+  }
+
+  // Retorna apenas Mapa simplificado: Cod -> Valor
+  const mapaFinal = new Map();
+  for (let [k, v] of mapa) {
+    mapaFinal.set(k, v.valor);
+  }
+  return mapaFinal;
+}
+
+function _norm(v) { 
+  return v ? String(v).trim().toUpperCase() : ""; 
+}
+
+function _parseDataSegura(valor) {
+  if (!valor) return null;
+  if (valor instanceof Date) return valor;
+  if (typeof valor === 'string') {
+    const partes = valor.trim().split('/');
+    if (partes.length === 3) {
+      return new Date(partes[2], partes[1] - 1, partes[0]);
+    }
+  }
+  return null; 
 }
